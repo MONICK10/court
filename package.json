@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "render-build": "npm install --legacy-peer-deps && NODE_OPTIONS='--max-old-space-size=400' npm run build"
+    "render-build": "npm install --legacy-peer-deps && npm run build"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
