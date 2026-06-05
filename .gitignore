@@ -41,7 +41,8 @@ android/app/build/
 android/local.properties
 android/.idea/
 
-# npm backup
+# npm — let each environment generate its own lockfile
+package-lock.json
 package-lock.json.bak
 
 # Claude Code tool config (local only)
