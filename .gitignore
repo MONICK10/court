@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Next.js
+.next/
+out/
+build/
+
+# Environment variables
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# Testing
+.coverage/
+.nyc_output/
+
+# Misc
+.turbo/
+
+# Android (Capacitor) — local build files only
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+
+# npm backup
+package-lock.json.bak
+
+# Claude Code tool config (local only)
+.claude/
+
+# Secret / key files — never commit these
+secret.txt
+secrets.txt
+*.secret
+keys.txt

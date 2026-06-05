@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AI Court</string>
+    <string name="title_activity_main">AI Court</string>
+    <string name="package_name">com.karunya.aicourtroom</string>
+    <string name="custom_url_scheme">com.karunya.aicourtroom</string>
+</resources>
