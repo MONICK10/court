@@ -1,7 +1,7 @@
 /* eslint-disable react/no-unescaped-entities */
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import CourtroomLayout from '@/components/CourtroomLayout'
@@ -17,6 +17,14 @@ const moodOptions: { value: CourtMood; label: string; emoji: string }[] = [
 
 export default function SetupPage() {
   const router = useRouter()
+
+  // Guard: must have logged in via /solo-login first
+  useEffect(() => {
+    if (sessionStorage.getItem('solo_auth') !== '1') {
+      router.replace('/solo-login')
+    }
+  }, [router])
+
   const [formData, setFormData] = useState<CaseSetup>({
     title: '',
     personAName: '',

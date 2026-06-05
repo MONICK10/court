@@ -148,7 +148,7 @@ export default function Home() {
 
             <motion.div variants={itemVariants} className="flex gap-6 text-sm text-gray-500">
               <a href="/home" className="hover:text-accent-gold transition">📊 History & Tasks</a>
-              <a href="/setup" className="hover:text-accent-gold transition">⚡ Quick Solo Case</a>
+              <a href="/solo-login" className="hover:text-accent-gold transition">⚡ Quick Solo Case</a>
             </motion.div>
 
             <motion.p variants={itemVariants} className="text-xs text-gray-600 text-center max-w-xl">

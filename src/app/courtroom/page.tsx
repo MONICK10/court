@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -14,7 +14,105 @@ import type { Evidence } from '@/types'
 // Three.js is browser-only — skip SSR
 const JudgeScene = dynamic(() => import('@/components/JudgeScene'), { ssr: false })
 
+// ─── Login gate ──────────────────────────────────────────────────────
+function LoginGate({ onSuccess }: { onSuccess: () => void }) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [shaking, setShaking] = useState(false)
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (username === 'admin' && password === 'volume3') {
+      sessionStorage.setItem('solo_auth', '1')
+      onSuccess()
+    } else {
+      setError('Invalid username or password')
+      setShaking(true)
+      setTimeout(() => setShaking(false), 600)
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center"
+      style={{ background: 'radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a0f 70%)' }}>
+      <motion.div
+        animate={shaking ? { x: [-12, 12, -10, 10, -6, 6, 0] } : { x: 0 }}
+        transition={{ duration: 0.5 }}
+        className="w-full max-w-sm mx-4"
+      >
+        {/* Gavel icon */}
+        <div className="text-center mb-8">
+          <div className="text-5xl mb-3">⚖️</div>
+          <h1 className="text-2xl font-bold" style={{ color: '#c0a060' }}>Solo Court</h1>
+          <p className="text-gray-400 text-sm mt-1">Restricted access — sign in to continue</p>
+        </div>
+
+        <form onSubmit={handleSubmit}
+          className="rounded-xl p-8 space-y-5"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(192,160,96,0.2)' }}>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              Username
+            </label>
+            <input
+              type="text"
+              autoComplete="username"
+              value={username}
+              onChange={e => { setUsername(e.target.value); setError('') }}
+              className="w-full px-4 py-3 rounded-lg text-white text-sm outline-none"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(192,160,96,0.3)',
+              }}
+              placeholder="Enter username"
+              autoFocus
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              Password
+            </label>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={e => { setPassword(e.target.value); setError('') }}
+              className="w-full px-4 py-3 rounded-lg text-white text-sm outline-none"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(192,160,96,0.3)',
+              }}
+              placeholder="Enter password"
+            />
+          </div>
+
+          {error && (
+            <p className="text-red-400 text-sm text-center">{error}</p>
+          )}
+
+          <button
+            type="submit"
+            className="w-full py-3 rounded-lg font-bold text-sm tracking-wide"
+            style={{ background: '#c0a060', color: '#0a0a0f' }}
+          >
+            Enter Courtroom
+          </button>
+        </form>
+      </motion.div>
+    </div>
+  )
+}
+
 export default function CourtroomPage() {
+  // ── Auth gate — must be first hooks, gate shown before any other render ──
+  const [authed, setAuthed] = useState(false)
+  useEffect(() => {
+    if (sessionStorage.getItem('solo_auth') === '1') setAuthed(true)
+  }, [])
+
   const router = useRouter()
   const {
     caseMemory,
@@ -100,6 +198,9 @@ export default function CourtroomPage() {
     sessionStorage.removeItem('caseSetup')
     router.push('/setup')
   }
+
+  // ── Auth gate render ──────────────────────────────────────────────────
+  if (!authed) return <LoginGate onSuccess={() => setAuthed(true)} />
 
   // ── Loading / empty state ──────────────────────────────────────────────
   if (!caseMemory) return (
