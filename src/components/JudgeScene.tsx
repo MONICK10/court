@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useRef, useEffect, useMemo } from 'react'
+import { Suspense, useRef, useEffect, useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { useGLTF, useAnimations } from '@react-three/drei'
 import * as THREE from 'three'
@@ -15,11 +15,14 @@ const MODELS = {
   argueB: '/models/argue2.glb',
 }
 
-useGLTF.preload(MODELS.idle)
-useGLTF.preload(MODELS.talkA)
-useGLTF.preload(MODELS.talkB)
-useGLTF.preload(MODELS.argueA)
-useGLTF.preload(MODELS.argueB)
+// Only preload on desktop — mobile has limited memory/WebGL
+if (typeof window !== 'undefined' && !/Mobi|Android/i.test(navigator.userAgent)) {
+  useGLTF.preload(MODELS.idle)
+  useGLTF.preload(MODELS.talkA)
+  useGLTF.preload(MODELS.talkB)
+  useGLTF.preload(MODELS.argueA)
+  useGLTF.preload(MODELS.argueB)
+}
 
 function resolveModelPath(state: AnimState, flip: boolean): string {
   switch (state) {
@@ -83,13 +86,30 @@ interface Props {
   flip?: boolean
 }
 
+function isWebGLAvailable(): boolean {
+  try {
+    const canvas = document.createElement('canvas')
+    return !!(canvas.getContext('webgl') || canvas.getContext('webgl2') || canvas.getContext('experimental-webgl'))
+  } catch {
+    return false
+  }
+}
+
 export default function JudgeScene({ animState, flip = false }: Props) {
   const modelPath = resolveModelPath(animState, flip)
+  const [webgl] = useState(() => typeof window !== 'undefined' && isWebGLAvailable())
+
+  if (!webgl) {
+    return <div style={{ width: '100%', height: '100%', background: '#0d0d1a' }} />
+  }
 
   return (
     <Canvas
       camera={{ position: [0, 0.2, 5], fov: 55 }}
       style={{ width: '100%', height: '100%' }}
+      onCreated={({ gl }) => {
+        gl.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+      }}
     >
       <color attach="background" args={['#0d0d1a']} />
       <SceneLights />

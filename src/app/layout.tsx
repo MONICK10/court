@@ -37,6 +37,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="CourtRoom" />
+        {/* Eruda — mobile console for debugging, remove after fix is confirmed */}
+        <script src="https://cdn.jsdelivr.net/npm/eruda" />
+        <script dangerouslySetInnerHTML={{ __html: 'eruda.init()' }} />
         {/* Register service worker for PWA */}
         <script
           dangerouslySetInnerHTML={{
