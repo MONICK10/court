@@ -122,7 +122,7 @@ export default function RoomCourtroomPage() {
 
   // Detect new judge messages → animate + caption + voice
   useEffect(() => {
-    if (!state) return
+    if (!state?.conversationHistory) return
     const history = state.conversationHistory
     if (history.length <= prevHistoryLen.current) return
     prevHistoryLen.current = history.length
@@ -139,7 +139,7 @@ export default function RoomCourtroomPage() {
       onEnd: () => setAnimState('idle'),
       language: state.language ?? 'english',
     })
-  }, [state?.conversationHistory.length, state?.currentPhase, speak])
+  }, [state?.conversationHistory?.length, state?.currentPhase, speak])
 
   useEffect(() => {
     const person = sessionStorage.getItem('roomPerson') as 'A' | 'B'
