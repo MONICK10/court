@@ -71,6 +71,8 @@ export default function RoomCourtroomPage() {
   const [transitionPhase, setTransitionPhase] = useState<string | null>(null)
   const [showObjection, setShowObjection] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<'ok' | 'reconnecting'>('ok')
+  const failCountRef = useRef(0)
 
   // Judge scene state
   const [animState, setAnimState] = useState<AnimState>('idle')
@@ -148,12 +150,23 @@ export default function RoomCourtroomPage() {
   }, [])
 
   const poll = useCallback(async () => {
-    const res = await fetch(`/api/room/courtroom?code=${code}`)
-    if (!res.ok) return
-    const data: CourtroomState = await res.json()
-    if (data.lastUpdated !== lastUpdated.current) {
-      lastUpdated.current = data.lastUpdated
-      setState(data)
+    try {
+      const res = await fetch(`/api/room/courtroom?code=${code}`)
+      if (!res.ok) {
+        failCountRef.current += 1
+        if (failCountRef.current >= 2) setConnectionStatus('reconnecting')
+        return
+      }
+      failCountRef.current = 0
+      setConnectionStatus('ok')
+      const data: CourtroomState = await res.json()
+      if (data.lastUpdated !== lastUpdated.current) {
+        lastUpdated.current = data.lastUpdated
+        setState(data)
+      }
+    } catch {
+      failCountRef.current += 1
+      if (failCountRef.current >= 2) setConnectionStatus('reconnecting')
     }
   }, [code])
 
@@ -166,7 +179,7 @@ export default function RoomCourtroomPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [state?.conversationHistory.length])
+  }, [state?.conversationHistory?.length])
 
   const submitInput = async () => {
     if (!userInput.trim() || !myPerson || submitting) return
@@ -306,6 +319,13 @@ export default function RoomCourtroomPage() {
           <JudgeScene animState={animState} flip={animFlip} />
         </ErrorBoundary>
       </div>
+
+      {/* Reconnecting banner */}
+      {connectionStatus === 'reconnecting' && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-50 bg-black/80 border border-yellow-500/50 text-yellow-300 text-xs px-4 py-2 rounded-full pointer-events-none animate-pulse">
+          Reconnecting...
+        </div>
+      )}
 
       {/* Bottom vignette to blend canvas into UI */}
       <div className="absolute bottom-0 left-0 right-0 h-64 bg-gradient-to-t from-[#0d0d1a] to-transparent pointer-events-none" />
