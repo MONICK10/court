@@ -3,7 +3,7 @@ import { getRoom, updateRoom } from '@/lib/roomStore'
 
 export async function POST(request: NextRequest) {
   try {
-    const { code, person, statement, mood } = await request.json()
+    const { code, person, statement, mood, language } = await request.json()
     if (!code || !person || !statement) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
     }
@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
       updateRoom(code, {
         personA: { ...room.personA, statement: statement.trim() },
         ...(mood ? { mood } : {}),
-        ...(body.language ? { language: body.language } : {}),
+        ...(language ? { language } : {}),
       })
     } else if (person === 'B' && room.personB) {
       updateRoom(code, { personB: { ...room.personB, statement: statement.trim() } })

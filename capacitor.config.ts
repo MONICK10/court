@@ -7,7 +7,7 @@ const config: CapacitorConfig = {
   // The WebView opens the production URL — all API routes (TTS, AI judge)
   // work because they run on Vercel, not locally on the phone.
   server: {
-    url: 'https://your-app.vercel.app',  // ← replace after deploying to Vercel
+    url: 'https://court-k8kc.onrender.com',
     cleartext: false,
   },
   // Fallback: static web dir (used if no server.url — for local testing)
