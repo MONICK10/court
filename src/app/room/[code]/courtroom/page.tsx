@@ -2,14 +2,21 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { motion, AnimatePresence } from 'framer-motion'
-import CourtroomLayout from '@/components/CourtroomLayout'
 import PhaseTransition from '@/components/PhaseTransition'
 import ObjectionPopup from '@/components/ObjectionPopup'
 import VerdictShareCard from '@/components/VerdictShareCard'
-import { useUIStore, THEME_CONFIG } from '@/hooks/useUIStore'
-import { playSound, startAmbience, stopAmbience, stopTyping, startTyping } from '@/utils/soundService'
+import CaptionBar from '@/components/CaptionBar'
+import HistoryDrawer from '@/components/HistoryDrawer'
+import { useUIStore } from '@/hooks/useUIStore'
+import { useSpeech, phaseToAnimState } from '@/hooks/useSpeech'
+import { playSound, startAmbience, stopAmbience, stopTyping, startTyping, setMuted, unlockAudio } from '@/utils/soundService'
 import type { CourtMood } from '@/types'
+import type { AnimState } from '@/components/JudgeScene'
+
+// Three.js is browser-only — skip SSR
+const JudgeScene = dynamic(() => import('@/components/JudgeScene'), { ssr: false })
 
 interface Message { speaker: string; text: string; timestamp: number }
 
@@ -36,6 +43,7 @@ interface CourtroomState {
   personBName: string
   courtName: string
   mood: string
+  language?: string
   initializing?: boolean
 }
 
@@ -52,7 +60,7 @@ export default function RoomCourtroomPage() {
   const router = useRouter()
   const code = params.code as string
 
-  const { setMood: setStoreMood, objectionsA, objectionsB } = useUIStore()
+  const { setMood: setStoreMood, objectionsA, objectionsB, isMuted, toggleMute } = useUIStore()
 
   const [myPerson, setMyPerson] = useState<'A' | 'B' | null>(null)
   const [state, setState] = useState<CourtroomState | null>(null)
@@ -61,9 +69,19 @@ export default function RoomCourtroomPage() {
   const [submitting, setSubmitting] = useState(false)
   const [transitionPhase, setTransitionPhase] = useState<string | null>(null)
   const [showObjection, setShowObjection] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+
+  // Judge scene state
+  const [animState, setAnimState] = useState<AnimState>('idle')
+  const [animFlip, setAnimFlip] = useState(false)
+  const [currentCaption, setCurrentCaption] = useState('')
+
   const lastUpdated = useRef(0)
   const prevPhase = useRef<string | null>(null)
+  const prevHistoryLen = useRef(0)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  const { speak, stop } = useSpeech()
 
   // Sync room mood → theme store
   useEffect(() => {
@@ -89,11 +107,8 @@ export default function RoomCourtroomPage() {
 
   // Typing sound while judge is processing
   useEffect(() => {
-    if (state?.isProcessing || submitting) {
-      startTyping()
-    } else {
-      stopTyping()
-    }
+    if (state?.isProcessing || submitting) startTyping()
+    else stopTyping()
   }, [state?.isProcessing, submitting])
 
   // Winner reveal sound
@@ -104,6 +119,27 @@ export default function RoomCourtroomPage() {
       playSound('winner')
     }
   }, [state?.verdict])
+
+  // Detect new judge messages → animate + caption + voice
+  useEffect(() => {
+    if (!state) return
+    const history = state.conversationHistory
+    if (history.length <= prevHistoryLen.current) return
+    prevHistoryLen.current = history.length
+
+    const last = history[history.length - 1]
+    if (last.speaker !== 'judge') return
+
+    const newAnim = phaseToAnimState(state.currentPhase, true)
+    setAnimFlip(Math.random() > 0.5)
+    setAnimState(newAnim)
+    setCurrentCaption(last.text)
+
+    speak(last.text, {
+      onEnd: () => setAnimState('idle'),
+      language: state.language ?? 'english',
+    })
+  }, [state?.conversationHistory.length, state?.currentPhase, speak])
 
   useEffect(() => {
     const person = sessionStorage.getItem('roomPerson') as 'A' | 'B'
@@ -133,6 +169,8 @@ export default function RoomCourtroomPage() {
 
   const submitInput = async () => {
     if (!userInput.trim() || !myPerson || submitting) return
+    stop()
+    setCurrentCaption('')
     setSubmitting(true)
     await fetch('/api/room/courtroom', {
       method: 'POST',
@@ -173,7 +211,6 @@ export default function RoomCourtroomPage() {
 
   const raiseObjection = async () => {
     if (!myPerson || submitting) return
-    // Use getState() to avoid hook-in-callback rule violation
     const granted = useUIStore.getState().useObjection(myPerson)
     if (!granted) return
     playSound('objection')
@@ -187,6 +224,12 @@ export default function RoomCourtroomPage() {
     })
     setSubmitting(false)
     poll()
+  }
+
+  const handleMuteToggle = () => {
+    const next = !isMuted
+    toggleMute()
+    setMuted(next)
   }
 
   const isMyTurn = state?.waitingFor === myPerson
@@ -206,7 +249,7 @@ export default function RoomCourtroomPage() {
     if (!state || !myPerson) return ''
     const myName = myPerson === 'A' ? state.personAName : state.personBName
     switch (state.currentPhase) {
-      case 'opening': return `${myName}, give your opening statement (2-3 sentences):`
+      case 'opening': return `${myName}, give your opening statement:`
       case 'investigation': return `${myName}, answer the judge's question:`
       case 'crossExamination': return `${myName}, answer the judge:`
       case 'finalStatements': return `${myName}, give your closing statement:`
@@ -215,26 +258,31 @@ export default function RoomCourtroomPage() {
   }
 
   if (!state) return (
-    <CourtroomLayout>
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-accent-gold text-xl animate-pulse">Court is convening...</div>
+    <div className="w-screen h-screen bg-[#0d0d1a] flex items-center justify-center">
+      <div className="text-center">
+        <div className="text-6xl mb-4 animate-bounce">⚖️</div>
+        <p className="text-accent-gold text-xl animate-pulse">Court is convening...</p>
       </div>
-    </CourtroomLayout>
+    </div>
   )
 
   if (state.initializing) return (
-    <CourtroomLayout>
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-5xl mb-4">⚖️</div>
-          <p className="text-accent-gold text-xl animate-pulse">Judge is preparing the court...</p>
-        </div>
+    <div className="w-screen h-screen bg-[#0d0d1a] flex items-center justify-center">
+      <div className="text-center">
+        <div className="text-5xl mb-4">⚖️</div>
+        <p className="text-accent-gold text-xl animate-pulse">Judge is preparing the court...</p>
       </div>
-    </CourtroomLayout>
+    </div>
   )
 
+  const historyMessages = state.conversationHistory.map(m => ({
+    ...m,
+    speaker: m.speaker === 'userA' ? 'userA' : m.speaker === 'userB' ? 'userB' : 'judge',
+  }))
+
   return (
-    <CourtroomLayout>
+    <div className="w-screen h-screen overflow-hidden relative bg-[#0d0d1a]" onClick={unlockAudio}>
+
       {/* Phase transition cinematic overlay */}
       <AnimatePresence>
         {transitionPhase && (
@@ -251,218 +299,219 @@ export default function RoomCourtroomPage() {
         {showObjection && <ObjectionPopup key="objection" />}
       </AnimatePresence>
 
-      <div className="min-h-screen flex flex-col relative">
-        <div className="flex-1 flex flex-col max-w-5xl mx-auto w-full px-4 pt-6 pb-28">
+      {/* Three.js judge canvas */}
+      <div className="absolute inset-0">
+        <JudgeScene animState={animState} flip={animFlip} />
+      </div>
 
-          {/* Header */}
-          <div className="mb-6">
-            <p className="text-xs font-semibold tracking-widest uppercase mb-1" style={{ color: 'var(--theme-accent)', opacity: 0.6 }}>
-              {THEME_CONFIG[(state.mood as CourtMood) ?? 'serious'].judgeLabel}
-            </p>
-            <h1 className="text-3xl font-bold" style={{ color: 'var(--theme-accent)' }}>{state.courtName}</h1>
-            <div className="flex items-center gap-4 text-sm text-gray-400 mt-1">
-              <span>Phase: <span className="font-semibold" style={{ color: 'var(--theme-accent)' }}>{PHASE_LABELS[state.currentPhase] ?? state.currentPhase}</span></span>
-              {state.currentPhase === 'crossExamination' && (
-                <><span>•</span><span>Round: <span style={{ color: 'var(--theme-accent)' }}>{state.crossExamRound}/2</span></span></>
-              )}
-              <span>•</span>
-              <span className={`${myPerson === 'A' ? 'text-blue-400' : 'text-purple-400'} font-semibold`}>
-                You: {myPerson === 'A' ? state.personAName : state.personBName}
-              </span>
-            </div>
-          </div>
+      {/* Bottom vignette to blend canvas into UI */}
+      <div className="absolute bottom-0 left-0 right-0 h-64 bg-gradient-to-t from-[#0d0d1a] to-transparent pointer-events-none" />
 
-          {/* Messages */}
-          <div className="flex-1 flex flex-col gap-4 overflow-y-auto pr-2">
-            <AnimatePresence mode="popLayout">
-              {state.conversationHistory.map((msg, idx) => {
-                const isRight = msg.speaker === 'userB'
-                const isJudge = msg.speaker === 'judge'
-                const bgClass = isJudge
-                  ? 'bg-accent-gold/10 border-accent-gold/50'
-                  : msg.speaker === 'userA'
-                  ? 'bg-blue-900/20 border-blue-500/30'
-                  : 'bg-purple-900/20 border-purple-500/30'
-
-                return (
-                  <motion.div
-                    key={idx}
-                    initial={{ opacity: 0, x: isRight ? 50 : -50 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className={`flex ${isRight ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div className={`max-w-2xl px-4 py-3 rounded-lg border ${bgClass}`}>
-                      <p className="text-xs font-semibold mb-1 opacity-70">
-                        {isJudge ? '⚖️' : '🧑'} {getName(msg.speaker)}
-                      </p>
-                      <p className="text-sm leading-relaxed text-white">{msg.text}</p>
-                    </div>
-                  </motion.div>
-                )
-              })}
-            </AnimatePresence>
-
-            {(state.isProcessing || submitting) && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start">
-                <div className="px-4 py-3 rounded-lg border border-accent-gold/50 bg-accent-gold/10">
-                  <div className="flex gap-2 items-center">
-                    <div className="flex gap-1">
-                      {[0, 1, 2].map(i => (
-                        <motion.div key={i} animate={{ scale: [1, 1.2, 1] }}
-                          transition={{ delay: i * 0.1, duration: 0.6, repeat: Infinity }}
-                          className="w-2 h-2 bg-accent-gold rounded-full" />
-                      ))}
-                    </div>
-                    <p className="text-xs text-accent-gold">Judge considering...</p>
-                  </div>
-                </div>
-              </motion.div>
+      {/* Top bar */}
+      <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-3 pointer-events-none">
+        <div>
+          <p className="text-accent-gold font-bold text-sm">{state.courtName}</p>
+          <div className="flex items-center gap-3 text-xs text-gray-400 mt-0.5">
+            <span className="uppercase tracking-wider">{PHASE_LABELS[state.currentPhase] ?? state.currentPhase}</span>
+            {state.currentPhase === 'crossExamination' && (
+              <span className="text-accent-gold">Round {state.crossExamRound}/2</span>
             )}
-
-            {!isMyTurn && !isMyEvidenceTurn && !state.isProcessing && state.waitingFor && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-center">
-                <p className="text-gray-500 text-sm animate-pulse">
-                  Waiting for {state.waitingFor === 'A' ? state.personAName : state.personBName}...
-                </p>
-              </motion.div>
-            )}
-
-            <div ref={bottomRef} />
+            <span className={myPerson === 'A' ? 'text-blue-400 font-semibold' : 'text-purple-400 font-semibold'}>
+              You: {myPerson === 'A' ? state.personAName : state.personBName}
+            </span>
           </div>
         </div>
-
-        {/* Bottom Controls */}
-        <div className="fixed bottom-0 left-0 right-0 bg-gray-900/95 border-t border-gray-700 px-4 py-4">
-          <div className="max-w-5xl mx-auto">
-            <AnimatePresence mode="wait">
-
-              {/* Evidence decision */}
-              {isMyEvidenceTurn && !state.isProcessing && !submitting && (
-                <motion.div key="evidence" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-3">
-                  <p className="text-sm font-semibold text-accent-gold">
-                    ⚖️ Do you have evidence to support your answer?
-                  </p>
-                  <input
-                    type="text"
-                    placeholder="Describe your evidence (screenshot, message, etc.)..."
-                    value={evidenceInput}
-                    onChange={e => setEvidenceInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && evidenceInput.trim() && continueAfterEvidence(true)}
-                    className="w-full bg-gray-800 border border-gray-600 focus:border-accent-gold text-white px-4 py-2 rounded focus:outline-none transition"
-                    autoFocus
-                  />
-                  <div className="flex gap-3">
-                    <button onClick={() => continueAfterEvidence(true)} disabled={!evidenceInput.trim()}
-                      className="flex-1 bg-accent-gold hover:bg-accent-gold/80 disabled:opacity-40 text-black font-bold py-2 rounded transition">
-                      Submit Evidence
-                    </button>
-                    <button onClick={() => continueAfterEvidence(false)}
-                      className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 rounded transition">
-                      No Evidence — Continue
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-
-              {/* User input */}
-              {isMyTurn && !state.waitingForEvidence && !state.isProcessing && !submitting && (
-                <motion.div key={`input-${state.currentPhase}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-sm font-semibold" style={{ color: 'var(--theme-accent)' }}>{getInputLabel()}</label>
-                    {/* OBJECTION button */}
-                    {canObjection && (
-                      <button
-                        onClick={raiseObjection}
-                        className="text-xs font-black tracking-widest px-3 py-1.5 rounded border transition-all"
-                        style={{
-                          color: '#ff3030',
-                          borderColor: '#ff3030',
-                          background: 'rgba(255,48,48,0.08)',
-                        }}
-                      >
-                        ✋ OBJECTION ({myPerson === 'A' ? objectionsA : objectionsB})
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Type your statement..."
-                      value={userInput}
-                      onChange={e => setUserInput(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && submitInput()}
-                      className="flex-1 bg-gray-800 border border-gray-600 text-white px-4 py-2 rounded focus:outline-none transition"
-                      style={{ '--tw-ring-color': 'var(--theme-accent)' } as React.CSSProperties}
-                      autoFocus
-                    />
-                    <button onClick={submitInput} disabled={!userInput.trim()}
-                      className="disabled:opacity-50 text-black font-bold px-6 py-2 rounded transition"
-                      style={{ backgroundColor: 'var(--theme-accent)' }}>
-                      Submit
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-
-              {/* Verdict display + share card */}
-              {state.currentPhase === 'verdict' && state.verdict && (
-                <motion.div key="verdict" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-4 pb-4">
-                  {/* Court orders / penalties */}
-                  {state.courtOrders && state.courtOrders.length > 0 && (
-                    <div className="rounded-lg p-4 space-y-2" style={{ background: `rgba(var(--theme-glow-rgb), 0.08)`, border: `1px solid rgba(var(--theme-glow-rgb), 0.25)` }}>
-                      <p className="text-sm font-bold" style={{ color: 'var(--theme-accent)' }}>📋 Court Orders:</p>
-                      {state.courtOrders.map(order => {
-                        const canMarkDone = !order.completed && (
-                          order.assignedTo === 'both' ||
-                          (order.assignedTo === 'A' && myPerson === 'B') ||
-                          (order.assignedTo === 'B' && myPerson === 'A')
-                        )
-                        return (
-                          <div key={order.id} className={`flex items-start gap-3 p-3 rounded-lg ${order.completed ? 'bg-green-900/20 border border-green-700/30' : 'bg-red-900/10 border border-red-700/20'}`}>
-                            <div className="flex-1">
-                              <p className={`text-sm font-semibold ${order.completed ? 'line-through text-gray-500' : 'text-white'}`}>{order.description}</p>
-                              <p className="text-xs text-gray-400 mt-0.5">Assigned to: {order.assignedName}</p>
-                              {canMarkDone && <p className="text-xs text-gray-500 mt-0.5">Once done in front of you, mark it</p>}
-                            </div>
-                            {order.completed ? (
-                              <span className="text-green-400 text-sm font-bold">✓</span>
-                            ) : canMarkDone ? (
-                              <button onClick={() => markTaskDone(order.id)}
-                                className="text-black text-xs font-bold px-3 py-1.5 rounded transition whitespace-nowrap"
-                                style={{ backgroundColor: 'var(--theme-accent)' }}>
-                                Mark Done
-                              </button>
-                            ) : <span className="text-gray-600 text-xs">Pending</span>}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {/* Shareable card + social buttons */}
-                  <VerdictShareCard
-                    caseTitle={state.courtName}
-                    winnerName={state.verdict.winnerName}
-                    loserName={state.verdict.loserName}
-                    winner={state.verdict.winner}
-                    verdictOneLiner={state.verdict.text.replace(/WINNER:.*$/m, '').replace(/LOSER:.*$/m, '').trim().split('\n').filter(Boolean).at(-1) ?? state.verdict.text}
-                    mood={(state.mood as CourtMood) ?? 'serious'}
-                    personAName={state.personAName}
-                    personBName={state.personBName}
-                  />
-
-                  <button onClick={() => router.push('/')}
-                    className="w-full font-bold py-3 rounded-lg transition text-black"
-                    style={{ backgroundColor: 'var(--theme-accent)' }}>
-                    ← Back to Home
-                  </button>
-                </motion.div>
-              )}
-
-            </AnimatePresence>
-          </div>
+        <div className="flex items-center gap-2 pointer-events-auto">
+          <button
+            onClick={handleMuteToggle}
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-black/40 border border-white/10 text-white/60 hover:text-white transition text-sm"
+          >
+            {isMuted ? '🔇' : '🔊'}
+          </button>
+          <button
+            onClick={() => setHistoryOpen(true)}
+            className="w-8 h-8 rounded-full bg-black/50 border border-white/20 flex items-center justify-center text-white hover:bg-white/10 transition"
+          >
+            ›
+          </button>
         </div>
       </div>
-    </CourtroomLayout>
+
+      {/* Processing dots */}
+      <AnimatePresence>
+        {(state.isProcessing || submitting) && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+          >
+            <div className="flex gap-1.5">
+              {[0, 1, 2].map(i => (
+                <motion.div
+                  key={i}
+                  animate={{ scale: [1, 1.4, 1] }}
+                  transition={{ delay: i * 0.15, duration: 0.7, repeat: Infinity }}
+                  className="w-2 h-2 bg-accent-gold rounded-full opacity-80"
+                />
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Waiting for other player */}
+      {!isMyTurn && !isMyEvidenceTurn && !state.isProcessing && state.waitingFor && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+          <p className="text-gray-400 text-sm animate-pulse">
+            Waiting for {state.waitingFor === 'A' ? state.personAName : state.personBName}...
+          </p>
+        </div>
+      )}
+
+      {/* Bottom UI */}
+      <div className="absolute bottom-0 left-0 right-0 px-4 pb-5 space-y-3">
+
+        {/* Caption bar */}
+        <CaptionBar text={currentCaption} speaker="Judge" />
+
+        {/* Verdict */}
+        <AnimatePresence>
+          {state.currentPhase === 'verdict' && state.verdict && (
+            <motion.div
+              key="verdict"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="space-y-3 max-w-2xl mx-auto w-full"
+            >
+              {state.courtOrders && state.courtOrders.length > 0 && (
+                <div className="bg-black/70 backdrop-blur-sm rounded-xl p-4 space-y-2 border border-accent-gold/30">
+                  <p className="text-sm font-bold text-accent-gold">📋 Court Orders:</p>
+                  {state.courtOrders.map(order => {
+                    const canMarkDone = !order.completed && (
+                      order.assignedTo === 'both' ||
+                      (order.assignedTo === 'A' && myPerson === 'B') ||
+                      (order.assignedTo === 'B' && myPerson === 'A')
+                    )
+                    return (
+                      <div key={order.id} className={`flex items-start gap-3 p-3 rounded-lg ${order.completed ? 'bg-green-900/20 border border-green-700/30' : 'bg-red-900/10 border border-red-700/20'}`}>
+                        <div className="flex-1">
+                          <p className={`text-sm font-semibold ${order.completed ? 'line-through text-gray-500' : 'text-white'}`}>{order.description}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">Assigned to: {order.assignedName}</p>
+                        </div>
+                        {order.completed ? (
+                          <span className="text-green-400 text-sm font-bold">✓</span>
+                        ) : canMarkDone ? (
+                          <button onClick={() => markTaskDone(order.id)}
+                            className="text-black text-xs font-bold px-3 py-1.5 rounded transition whitespace-nowrap bg-accent-gold hover:bg-accent-gold/80">
+                            Mark Done
+                          </button>
+                        ) : <span className="text-gray-600 text-xs">Pending</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              <VerdictShareCard
+                caseTitle={state.courtName}
+                winnerName={state.verdict.winnerName}
+                loserName={state.verdict.loserName}
+                winner={state.verdict.winner}
+                verdictOneLiner={state.verdict.text.replace(/WINNER:.*$/m, '').replace(/LOSER:.*$/m, '').trim().split('\n').filter(Boolean).at(-1) ?? state.verdict.text}
+                mood={(state.mood as CourtMood) ?? 'serious'}
+                personAName={state.personAName}
+                personBName={state.personBName}
+              />
+
+              <button onClick={() => router.push('/')}
+                className="w-full font-bold py-3 rounded-xl transition text-black bg-accent-gold hover:bg-accent-gold/80">
+                ← Back to Home
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Evidence input */}
+        <AnimatePresence>
+          {isMyEvidenceTurn && !state.isProcessing && !submitting && (
+            <motion.div key="evidence" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="bg-black/60 backdrop-blur-sm border border-white/10 rounded-xl px-4 py-3 space-y-2 max-w-2xl mx-auto w-full">
+              <p className="text-xs text-accent-gold font-semibold">⚖️ Do you have evidence to support your answer?</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Describe your evidence (screenshot, message, etc.)..."
+                  value={evidenceInput}
+                  onChange={e => setEvidenceInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && evidenceInput.trim() && continueAfterEvidence(true)}
+                  className="flex-1 bg-white/10 border border-white/20 text-white placeholder-gray-500 px-3 py-2 rounded-lg focus:outline-none focus:border-accent-gold text-sm transition"
+                  autoFocus
+                />
+                <button onClick={() => continueAfterEvidence(true)} disabled={!evidenceInput.trim()}
+                  className="bg-accent-gold/80 hover:bg-accent-gold disabled:opacity-40 text-black font-bold px-4 py-2 rounded-lg transition text-sm">
+                  Submit
+                </button>
+                <button onClick={() => continueAfterEvidence(false)}
+                  className="bg-white/10 hover:bg-white/20 text-white font-bold px-4 py-2 rounded-lg transition text-sm">
+                  Skip
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* User input */}
+        <AnimatePresence>
+          {isMyTurn && !state.waitingForEvidence && !state.isProcessing && !submitting && state.currentPhase !== 'verdict' && (
+            <motion.div key={`input-${state.currentPhase}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="flex gap-2 max-w-2xl mx-auto w-full">
+              <div className="flex-1 flex gap-2">
+                {canObjection && (
+                  <button
+                    onClick={raiseObjection}
+                    className="text-xs font-black tracking-widest px-3 py-2 rounded-lg border transition-all shrink-0"
+                    style={{ color: '#ff3030', borderColor: '#ff3030', background: 'rgba(255,48,48,0.08)' }}
+                  >
+                    ✋ ({myPerson === 'A' ? objectionsA : objectionsB})
+                  </button>
+                )}
+                <input
+                  type="text"
+                  placeholder={getInputLabel()}
+                  value={userInput}
+                  onChange={e => setUserInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && submitInput()}
+                  className="flex-1 bg-black/60 backdrop-blur-sm border border-white/20 text-white placeholder-gray-500 px-4 py-3 rounded-xl focus:outline-none focus:border-accent-gold transition text-sm"
+                  autoFocus
+                />
+                <button onClick={submitInput} disabled={!userInput.trim()}
+                  className="bg-accent-gold hover:bg-accent-gold/80 disabled:opacity-50 text-black font-bold px-6 py-3 rounded-xl transition text-sm">
+                  Send
+                </button>
+              </div>
+              <button
+                onClick={() => setHistoryOpen(true)}
+                className="w-12 h-12 bg-black/60 backdrop-blur-sm border border-white/20 rounded-xl text-white text-xl hover:bg-white/10 transition flex items-center justify-center"
+              >
+                ›
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+      </div>
+
+      {/* History drawer */}
+      <HistoryDrawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        messages={historyMessages}
+        nameA={state.personAName}
+        nameB={state.personBName}
+      />
+
+      <div ref={bottomRef} />
+    </div>
   )
 }
