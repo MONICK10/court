@@ -184,6 +184,7 @@ export async function GET(request: NextRequest) {
     personBName: room.personB!.name,
     courtName: room.courtName,
     mood: room.mood,
+    language: room.language,
   })
 }
 

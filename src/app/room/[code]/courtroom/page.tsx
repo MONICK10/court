@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { motion, AnimatePresence } from 'framer-motion'
+import ErrorBoundary from '@/components/ErrorBoundary'
 import PhaseTransition from '@/components/PhaseTransition'
 import ObjectionPopup from '@/components/ObjectionPopup'
 import VerdictShareCard from '@/components/VerdictShareCard'
@@ -275,7 +276,7 @@ export default function RoomCourtroomPage() {
     </div>
   )
 
-  const historyMessages = state.conversationHistory.map(m => ({
+  const historyMessages = (state.conversationHistory ?? []).map(m => ({
     ...m,
     speaker: m.speaker === 'userA' ? 'userA' : m.speaker === 'userB' ? 'userB' : 'judge',
   }))
@@ -299,9 +300,11 @@ export default function RoomCourtroomPage() {
         {showObjection && <ObjectionPopup key="objection" />}
       </AnimatePresence>
 
-      {/* Three.js judge canvas */}
+      {/* Three.js judge canvas — wrapped so a WebGL crash can't kill the page */}
       <div className="absolute inset-0">
-        <JudgeScene animState={animState} flip={animFlip} />
+        <ErrorBoundary fallback={<div className="w-full h-full bg-[#0d0d1a]" />}>
+          <JudgeScene animState={animState} flip={animFlip} />
+        </ErrorBoundary>
       </div>
 
       {/* Bottom vignette to blend canvas into UI */}
